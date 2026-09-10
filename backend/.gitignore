@@ -1,0 +1,12 @@
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Node & Build Outputs
+node_modules/
+dist/
+*.db
+*.db-journal
+*.log
+uploads/

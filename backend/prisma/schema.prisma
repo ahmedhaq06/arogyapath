@@ -1,0 +1,809 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==================== AUTH & USERS ====================
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  phone           String?   @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  role            Role      @default(PATIENT)
+  isActive        Boolean   @default(true)
+  isLocked        Boolean   @default(false)
+  failedAttempts  Int       @default(0)
+  lastLoginAt     DateTime?
+  languagePreference String @default("en")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  patient         Patient?
+  provider        Provider?
+  notifications   Notification[]
+  notificationPreferences NotificationPreference[]
+  auditLogs       AuditLog[]     @relation("AuditActor")
+  refreshTokens   RefreshToken[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  token       String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  revokedAt   DateTime?
+
+  @@index([token])
+  @@index([userId])
+}
+
+enum Role {
+  PATIENT
+  HEALTH_WORKER
+  NURSE
+  DOCTOR
+  SPECIALIST
+  LAB_TECHNICIAN
+  PHARMACIST
+  FACILITY_ADMIN
+  SYSTEM_ADMIN
+}
+
+// ==================== PATIENTS ====================
+
+model Patient {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id])
+  patientId         String    @unique // Human-readable ID like "P-2024-0001"
+  dateOfBirth       DateTime?
+  sex               String?   // male, female, other
+  bloodGroup        String?
+  address           String?
+  village           String?
+  district          String?
+  state             String?
+  pincode           String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  emergencyContactRelation String?
+  insuranceId       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  allergies         Allergy[]
+  conditions        Condition[]
+  medications       PatientMedication[]
+  immunizations     Immunization[]
+  encounters        Encounter[]
+  appointments      Appointment[]
+  referrals         Referral[]
+  diagnosticOrders  DiagnosticOrder[]
+  prescriptions     Prescription[]
+  followUps         FollowUp[]
+  documents         Document[]
+  consents          Consent[]
+  triageAssessments TriageAssessment[]
+  vitals            Vital[]
+
+  @@index([patientId])
+  @@index([village])
+  @@index([district])
+}
+
+model Allergy {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  allergen    String
+  reaction    String?
+  severity    String?  // mild, moderate, severe
+  status      String   @default("active") // active, inactive, resolved
+  notedDate   DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model Condition {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  name        String
+  code        String?  // ICD-10 or SNOMED code
+  status      String   @default("active") // active, resolved, managed
+  onsetDate   DateTime?
+  resolvedDate DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model PatientMedication {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  name        String
+  dosage      String?
+  frequency   String?
+  route       String?
+  startDate   DateTime?
+  endDate     DateTime?
+  status      String   @default("active") // active, completed, discontinued
+  prescribedBy String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model Immunization {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  vaccine     String
+  doseNumber  Int?
+  dateGiven   DateTime
+  givenBy     String?
+  facility    String?
+  nextDueDate DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model Consent {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  type        String   // data_sharing, treatment, referral
+  status      String   @default("granted") // granted, revoked
+  description String?
+  grantedAt   DateTime @default(now())
+  revokedAt   DateTime?
+  expiresAt   DateTime?
+
+  @@index([patientId])
+}
+
+// ==================== FACILITIES ====================
+
+model Facility {
+  id               String   @id @default(uuid())
+  name             String
+  type             FacilityType
+  level            Int      @default(1) // 1=Sub-Centre, 2=PHC, 3=CHC, 4=Rural Hospital, 5=District Hospital, 6=Medical College
+  address          String?
+  village          String?
+  district         String?
+  state            String?
+  pincode          String?
+  latitude         Float?
+  longitude        Float?
+  phone            String?
+  email            String?
+  operatingHoursStart String? // "08:00"
+  operatingHoursEnd   String? // "17:00"
+  emergencyAvailable  Boolean @default(false)
+  totalBeds        Int      @default(0)
+  availableBeds    Int      @default(0)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  services         FacilityService[]
+  departments      Department[]
+  staff            FacilityStaff[]
+  diagnosticCapabilities FacilityDiagnostic[]
+  equipment        FacilityEquipment[]
+  appointmentSlots AppointmentSlot[]
+  appointments     Appointment[]
+  referralsReceived Referral[] @relation("ReceivingFacility")
+  referralsSent    Referral[]  @relation("ReferringFacility")
+  encounters       Encounter[]
+  diagnosticOrders DiagnosticOrder[]
+
+  @@index([type])
+  @@index([district])
+  @@index([latitude, longitude])
+}
+
+enum FacilityType {
+  SUB_CENTRE
+  PHC
+  CHC
+  RURAL_HOSPITAL
+  DISTRICT_HOSPITAL
+  MEDICAL_COLLEGE
+  SPECIALIST_CENTRE
+  DIAGNOSTIC_CENTRE
+  PHARMACY
+}
+
+model FacilityService {
+  id          String   @id @default(uuid())
+  facilityId  String
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  serviceName String
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([facilityId])
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  facilityId  String
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  name        String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([facilityId])
+}
+
+model FacilityStaff {
+  id          String   @id @default(uuid())
+  facilityId  String
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  providerId  String
+  provider    Provider @relation(fields: [providerId], references: [id])
+  role        String
+  isActive    Boolean  @default(true)
+  joinedAt    DateTime @default(now())
+
+  @@index([facilityId])
+  @@index([providerId])
+}
+
+model FacilityDiagnostic {
+  id          String   @id @default(uuid())
+  facilityId  String
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  testName    String
+  isAvailable Boolean  @default(true)
+  turnaroundHours Int? // typical turnaround time
+  createdAt   DateTime @default(now())
+
+  @@index([facilityId])
+}
+
+model FacilityEquipment {
+  id          String   @id @default(uuid())
+  facilityId  String
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  name        String
+  status      String   @default("operational") // operational, maintenance, out_of_service
+  createdAt   DateTime @default(now())
+
+  @@index([facilityId])
+}
+
+// ==================== PROVIDERS ====================
+
+model Provider {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  registrationNo  String?  // Medical registration number
+  specialization  String?
+  qualification   String?
+  experienceYears Int?
+  isAvailable     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  facilityAssignments FacilityStaff[]
+  encounters      Encounter[]
+  referralsMade   Referral[]  @relation("ReferringProvider")
+  referralsReceived Referral[] @relation("ReceivingProvider")
+  diagnosticOrders DiagnosticOrder[]  @relation("OrderingProvider")
+  prescriptions   Prescription[]
+  appointmentSlots AppointmentSlot[]
+
+  @@index([specialization])
+}
+
+// ==================== CLINICAL ====================
+
+model Encounter {
+  id              String   @id @default(uuid())
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  providerId      String
+  provider        Provider @relation(fields: [providerId], references: [id])
+  facilityId      String
+  facility        Facility @relation(fields: [facilityId], references: [id])
+  appointmentId   String?
+  encounterDate   DateTime @default(now())
+  chiefComplaint  String?
+  presentIllness  String?
+  assessment      String?
+  diagnosis       String?
+  diagnosisCode   String? // ICD-10
+  treatmentPlan   String?
+  clinicalNotes   String?
+  followUpNotes   String?
+  status          String   @default("in_progress") // in_progress, completed, cancelled
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  vitals          Vital[]
+  symptoms        SymptomRecord[]
+  diagnosticOrders DiagnosticOrder[]
+  prescriptions   Prescription[]
+  referrals       Referral[]
+  followUps       FollowUp[]
+
+  @@index([patientId])
+  @@index([providerId])
+  @@index([facilityId])
+  @@index([encounterDate])
+}
+
+model Vital {
+  id              String   @id @default(uuid())
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  encounterId     String?
+  encounter       Encounter? @relation(fields: [encounterId], references: [id])
+  temperature     Float?   // °F
+  systolicBP      Int?
+  diastolicBP     Int?
+  heartRate       Int?     // bpm
+  respiratoryRate Int?     // breaths/min
+  oxygenSaturation Float?  // %
+  weight          Float?   // kg
+  height          Float?   // cm
+  bloodGlucose    Float?   // mg/dL
+  painLevel       Int?     // 0-10
+  recordedBy      String?
+  recordedAt      DateTime @default(now())
+
+  @@index([patientId])
+  @@index([encounterId])
+}
+
+model SymptomRecord {
+  id          String   @id @default(uuid())
+  encounterId String?
+  encounter   Encounter? @relation(fields: [encounterId], references: [id])
+  triageId    String?
+  triage      TriageAssessment? @relation(fields: [triageId], references: [id])
+  symptom     String
+  severity    String?  // mild, moderate, severe
+  duration    String?
+  onset       String?  // sudden, gradual
+  location    String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([encounterId])
+  @@index([triageId])
+}
+
+// ==================== TRIAGE ====================
+
+model TriageAssessment {
+  id              String   @id @default(uuid())
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  conductedBy     String?  // userId of person who conducted
+  category        String   // EMERGENCY, URGENT, ROUTINE, SELF_CARE
+  riskScore       Int?     // 0-100
+  redFlagsDetected String? // JSON array of detected red flags
+  aiSummary       String?
+  aiRecommendation String?
+  recommendedFacilityId String?
+  recommendedCareLevel String?
+  disclaimer      String   @default("This assessment is for decision support only and does not replace evaluation by a qualified healthcare professional.")
+  status          String   @default("completed")
+  createdAt       DateTime @default(now())
+
+  symptoms        SymptomRecord[]
+
+  @@index([patientId])
+  @@index([category])
+}
+
+model TriageRule {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  symptom     String
+  condition   String   // JSON condition
+  category    String   // EMERGENCY, URGENT, ROUTINE
+  priority    Int      @default(0) // Higher = evaluated first
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+// ==================== REFERRALS ====================
+
+model Referral {
+  id                  String   @id @default(uuid())
+  referralId          String   @unique // Human-readable like "REF-2024-0001"
+  patientId           String
+  patient             Patient  @relation(fields: [patientId], references: [id])
+  encounterId         String?
+  encounter           Encounter? @relation(fields: [encounterId], references: [id])
+  referringFacilityId String
+  referringFacility   Facility @relation("ReferringFacility", fields: [referringFacilityId], references: [id])
+  receivingFacilityId String
+  receivingFacility   Facility @relation("ReceivingFacility", fields: [receivingFacilityId], references: [id])
+  referringProviderId String
+  referringProvider   Provider @relation("ReferringProvider", fields: [referringProviderId], references: [id])
+  receivingProviderId String?
+  receivingProvider   Provider? @relation("ReceivingProvider", fields: [receivingProviderId], references: [id])
+  reason              String
+  urgency             String   @default("routine") // emergency, urgent, routine
+  clinicalSummary     String?
+  symptoms            String?  // JSON
+  relevantHistory     String?
+  vitals              String?  // JSON snapshot
+  diagnostics         String?  // JSON references
+  notes               String?
+  status              ReferralStatus @default(SUBMITTED)
+  appointmentId       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  statusHistory       ReferralStatusHistory[]
+  documents           Document[]
+
+  @@index([patientId])
+  @@index([referringFacilityId])
+  @@index([receivingFacilityId])
+  @@index([status])
+  @@index([referralId])
+}
+
+enum ReferralStatus {
+  DRAFT
+  SUBMITTED
+  ACCEPTED
+  APPOINTMENT_SCHEDULED
+  IN_TRANSIT
+  ARRIVED
+  UNDER_REVIEW
+  COMPLETED
+  FOLLOW_UP_REQUIRED
+  CLOSED
+  CANCELLED
+}
+
+model ReferralStatusHistory {
+  id          String   @id @default(uuid())
+  referralId  String
+  referral    Referral @relation(fields: [referralId], references: [id])
+  status      ReferralStatus
+  changedBy   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([referralId])
+}
+
+// ==================== DIAGNOSTICS ====================
+
+model DiagnosticTest {
+  id          String   @id @default(uuid())
+  name        String
+  code        String?  // LOINC code
+  category    String?  // hematology, biochemistry, microbiology, imaging
+  description String?
+  normalRange String?
+  unit        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  orders      DiagnosticOrder[]
+}
+
+model DiagnosticOrder {
+  id              String   @id @default(uuid())
+  orderId         String   @unique // Human-readable
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  encounterId     String?
+  encounter       Encounter? @relation(fields: [encounterId], references: [id])
+  testId          String
+  test            DiagnosticTest @relation(fields: [testId], references: [id])
+  orderingProviderId String
+  orderingProvider  Provider @relation("OrderingProvider", fields: [orderingProviderId], references: [id])
+  facilityId      String
+  facility        Facility @relation(fields: [facilityId], references: [id])
+  priority        String   @default("routine") // stat, urgent, routine
+  reason          String?
+  status          DiagnosticStatus @default(ORDERED)
+  orderedAt       DateTime @default(now())
+  collectedAt     DateTime?
+  processedAt     DateTime?
+  resultReadyAt   DateTime?
+  verifiedAt      DateTime?
+  releasedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  results         DiagnosticResult[]
+
+  @@index([patientId])
+  @@index([status])
+  @@index([orderId])
+}
+
+enum DiagnosticStatus {
+  ORDERED
+  SAMPLE_PENDING
+  SAMPLE_COLLECTED
+  PROCESSING
+  RESULT_READY
+  VERIFIED
+  RELEASED
+  CANCELLED
+}
+
+model DiagnosticResult {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           DiagnosticOrder @relation(fields: [orderId], references: [id])
+  parameterName   String
+  value           String
+  unit            String?
+  referenceRange  String?
+  isAbnormal      Boolean  @default(false)
+  interpretation  String?
+  notes           String?
+  enteredBy       String?
+  verifiedBy      String?
+  createdAt       DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// ==================== PRESCRIPTIONS ====================
+
+model Prescription {
+  id              String   @id @default(uuid())
+  prescriptionId  String   @unique // Human-readable
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  encounterId     String?
+  encounter       Encounter? @relation(fields: [encounterId], references: [id])
+  providerId      String
+  provider        Provider @relation(fields: [providerId], references: [id])
+  notes           String?
+  status          String   @default("active") // active, completed, cancelled
+  dispensingStatus String  @default("pending") // pending, partial, dispensed
+  prescribedAt    DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           PrescriptionItem[]
+
+  @@index([patientId])
+  @@index([prescriptionId])
+}
+
+model PrescriptionItem {
+  id              String   @id @default(uuid())
+  prescriptionId  String
+  prescription    Prescription @relation(fields: [prescriptionId], references: [id])
+  medicineName    String
+  dosage          String?
+  frequency       String?  // "twice daily", "every 8 hours"
+  route           String?  // oral, topical, injection
+  duration        String?  // "7 days", "2 weeks"
+  quantity        Int?
+  instructions    String?
+  availability    String   @default("pending") // available, partial, unavailable, pending
+  createdAt       DateTime @default(now())
+
+  @@index([prescriptionId])
+}
+
+// ==================== APPOINTMENTS ====================
+
+model AppointmentSlot {
+  id          String   @id @default(uuid())
+  facilityId  String
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  providerId  String?
+  provider    Provider? @relation(fields: [providerId], references: [id])
+  department  String?
+  date        DateTime
+  startTime   String   // "09:00"
+  endTime     String   // "09:30"
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([facilityId, date])
+  @@index([providerId, date])
+}
+
+model Appointment {
+  id              String   @id @default(uuid())
+  appointmentId   String   @unique // Human-readable
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  facilityId      String
+  facility        Facility @relation(fields: [facilityId], references: [id])
+  department      String?
+  providerName    String?
+  appointmentDate DateTime
+  timeSlot        String?  // "09:00-09:30"
+  type            String   @default("consultation") // consultation, follow_up, referral, diagnostic
+  priority        String   @default("routine") // emergency, urgent, routine
+  reason          String?
+  status          AppointmentStatus @default(REQUESTED)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([facilityId])
+  @@index([appointmentDate])
+  @@index([appointmentId])
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  RESCHEDULED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ==================== FOLLOW-UPS ====================
+
+model FollowUp {
+  id              String   @id @default(uuid())
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id])
+  encounterId     String?
+  encounter       Encounter? @relation(fields: [encounterId], references: [id])
+  type            String   // consultation, diagnostic_review, medication_review, referral_followup, chronic_care
+  scheduledDate   DateTime
+  reason          String?
+  instructions    String?
+  status          String   @default("scheduled") // scheduled, completed, missed, cancelled
+  completedAt     DateTime?
+  completedBy     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([scheduledDate])
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   // appointment_reminder, referral_update, lab_result, followup_reminder, prescription, urgent_alert
+  title       String
+  message     String
+  data        String?  // JSON metadata
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model NotificationPreference {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   // appointment, referral, lab, followup, prescription
+  inApp       Boolean  @default(true)
+  sms         Boolean  @default(false)
+  email       Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, type])
+}
+
+// ==================== DOCUMENTS ====================
+
+model Document {
+  id              String   @id @default(uuid())
+  patientId       String?
+  patient         Patient? @relation(fields: [patientId], references: [id])
+  referralId      String?
+  referral        Referral? @relation(fields: [referralId], references: [id])
+  fileName        String
+  originalName    String
+  mimeType        String
+  fileSize        Int
+  storagePath     String
+  category        String?  // prescription, lab_report, imaging, clinical_note, consent, other
+  description     String?
+  uploadedBy      String?
+  createdAt       DateTime @default(now())
+
+  @@index([patientId])
+  @@index([referralId])
+}
+
+// ==================== AUDIT ====================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?
+  actor       User?    @relation("AuditActor", fields: [actorId], references: [id])
+  action      String   // PATIENT_CREATED, RECORD_ACCESSED, REFERRAL_CREATED, etc.
+  resource    String   // patient, encounter, referral, etc.
+  resourceId  String?
+  details     String?  // JSON
+  ipAddress   String?
+  userAgent   String?
+  outcome     String   @default("success") // success, failure, denied
+  createdAt   DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+}
+
+// ==================== OFFLINE SYNC ====================
+
+model OfflineSyncRecord {
+  id          String   @id @default(uuid())
+  userId      String
+  operation   String   // create, update, delete
+  resource    String
+  resourceId  String?
+  data        String   // JSON payload
+  status      String   @default("pending") // pending, synced, conflict, failed
+  conflictData String? // JSON
+  syncedAt    DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, status])
+}
+
+// ==================== HEALTH EDUCATION ====================
+
+model HealthEducation {
+  id          String   @id @default(uuid())
+  titleEn     String
+  titleHi     String?
+  titleUr     String?
+  contentEn   String
+  contentHi   String?
+  contentUr   String?
+  category    String   // maternal_health, child_health, nutrition, hygiene, vaccination, chronic_disease, preventive_care, medication_safety, when_to_seek_care
+  icon        String?
+  sortOrder   Int      @default(0)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+}

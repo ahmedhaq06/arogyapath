@@ -1,0 +1,16 @@
+{
+  "name": "arogyapath-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Arogyapath - Rural Healthcare Coordination & Referral Network",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "seed": "cd backend && npx tsx prisma/seed.ts",
+    "build": "cd backend && npm run build && cd ../frontend && npm run build",
+    "test": "cd backend && npm test"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

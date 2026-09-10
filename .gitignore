@@ -1,0 +1,16 @@
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Node Dependencies & Builds
+node_modules/
+dist/
+build/
+*.db
+*.db-journal
+coverage/
+.DS_Store
+*.log
+uploads/
+.turbo/
